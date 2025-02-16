@@ -1,29 +1,37 @@
 import argparse
+from datetime import datetime
 
 import agents
 import ale_py
 import gymnasium as gym
-import torch
 import utils
 from gymnasium.wrappers import RecordVideo
-from utils import Experience, ExperienceBuffer
-
 from logger import setup_logger
+from utils import Experience, ExperienceBuffer
 
 gym.register_envs(ale_py)
 
+RESULTS_BASE_PATH = "results"
 
-def train(env_name: str) -> None:
+
+def get_results_path(env_name: str) -> str:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{RESULTS_BASE_PATH}/{env_name}/{timestamp}"
+
+
+def train(env_name: str, recording_freq: int) -> None:
     """Train a DQN agent in the specified environment."""
     logger = setup_logger(f"dqn_{env_name}")
     logger.info(f"Training DQN agent on {env_name} environment")
 
+    results_path = get_results_path(env_name)
+
     env, cfg = utils.get_env_and_config(env_name)
     env = RecordVideo(
         env,
-        video_folder=f"videos/{env_name}",
+        video_folder=results_path,
         name_prefix="training",
-        episode_trigger=lambda x: x % 100 == 0 or x == cfg.n_episodes - 1,
+        episode_trigger=lambda x: x % recording_freq == 0 or x == cfg.n_episodes - 1,
     )
     agent = agents.get_agent(env, env_name, cfg)
     buffer = ExperienceBuffer(capacity=cfg.experience_buffer_size)
@@ -67,8 +75,9 @@ def train(env_name: str) -> None:
         # decay epsilon after each episode
         agent.decay_epsilon()
 
-    torch.save(agent.dqn_network.state_dict(), f"{env_name}.pth")
     env.close()
+
+    agent.save(f"{results_path}/agent.pth")
 
 
 if __name__ == "__main__":
@@ -79,5 +88,11 @@ if __name__ == "__main__":
         default="lunar_lander",
         help="Name of the environment. Can be: lunar_lander, breakout",
     )
+    parser.add_argument(
+        "--recording_freq",
+        type=int,
+        default=5000,
+        help="Frequency at which to record the environment",
+    )
     args = parser.parse_args()
-    train(args.env_name)
+    train(args.env_name, args.recording_freq)
