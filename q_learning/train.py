@@ -95,7 +95,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--recording_freq",
         type=int,
-        default=100,
+        default=1000,
         help="Frequency at which to record the environment",
     )
     args = parser.parse_args()
