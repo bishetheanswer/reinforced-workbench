@@ -8,7 +8,7 @@ To train an agent, use the `train.py` script with the desired environment:
 
 ```bash
 # Train on LunarLander
-python train.py --env_name lunar_lander
+python train.py --env_name lunar_lander --recording_freq 100 --track
 
 # Train on Breakout
 python train.py --env_name breakout

@@ -1,10 +1,15 @@
 import argparse
+import os
+from dataclasses import asdict
 from datetime import datetime
+from random import randint
 
 import agents
 import ale_py
 import gymnasium as gym
 import utils
+import wandb
+from configs import Config
 from gymnasium.wrappers import RecordVideo
 from logger import setup_logger
 from utils import Experience, ExperienceBuffer
@@ -14,12 +19,22 @@ gym.register_envs(ale_py)
 RESULTS_BASE_PATH = "results"
 
 
+def setup_wandb(
+    project: str, name: str, tags: list[str], cfg: Config, notes: str = ""
+) -> None:
+    """Setup Weights & Biases for tracking the experiment."""
+    api_key = os.getenv("WANDB_KEY")
+    wandb.login(key=api_key)
+    wandb.init(project=project, name=name, tags=tags, notes=notes, config=asdict(cfg))
+
+
 def get_results_path(env_name: str) -> str:
+    """Get the path where to store the results of the experiment."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"{RESULTS_BASE_PATH}/{env_name}/{timestamp}"
 
 
-def train(env_name: str, recording_freq: int) -> None:
+def train(env_name: str, recording_freq: int, track: bool) -> None:
     """Train a DQN agent in the specified environment."""
     logger = setup_logger(f"dqn_{env_name}")
     logger.info(f"Training DQN agent on {env_name} environment")
@@ -33,8 +48,18 @@ def train(env_name: str, recording_freq: int) -> None:
         name_prefix="training",
         episode_trigger=lambda x: x % recording_freq == 0 or x == cfg.n_episodes - 1,
     )
+
     agent = agents.get_agent(env, env_name, cfg)
     buffer = ExperienceBuffer(capacity=cfg.experience_buffer_size)
+
+    if track:
+        setup_wandb(
+            project=env_name,
+            name=f"dqn-experience_buffer-{randint(0, 10000)}",
+            tags=["dqn", "experience_buffer"],
+            cfg=cfg,
+        )
+        wandb.watch(agent.dqn_network, log="all", log_freq=100, log_graph=True)
 
     episodes_rewards = []
     i = 1
@@ -42,6 +67,7 @@ def train(env_name: str, recording_freq: int) -> None:
         state, _ = env.reset()
         done = False
         episode_reward = 0
+        episode_steps = 0
 
         while not done:
             action = agent.get_action(state)
@@ -62,11 +88,21 @@ def train(env_name: str, recording_freq: int) -> None:
             state = next_state
             i += 1
             episode_reward += reward
+            episode_steps += 1
 
         logger.info(
             f"Episode: {episode}, Epsilon: {agent.epsilon}, Reward: {episode_reward}"
         )
         episodes_rewards.append(episode_reward)
+
+        if track:
+            wandb.log(
+                {
+                    "reward": episode_reward,
+                    "episode_durantion_steps": episode_steps,
+                    "epsilon": agent.epsilon,
+                }
+            )
 
         if agent.has_converged(episodes_rewards):
             logger.info(f"Converged after {episode} episodes")
@@ -78,6 +114,7 @@ def train(env_name: str, recording_freq: int) -> None:
     env.close()
 
     agent.save(f"{results_path}/agent.pth")
+    wandb.save(f"{results_path}/agent.pth")
 
 
 if __name__ == "__main__":
@@ -94,5 +131,11 @@ if __name__ == "__main__":
         default=5000,
         help="Frequency at which to record the environment",
     )
+    parser.add_argument(
+        "--track",
+        action="store_true",
+        help="Track the experiment with Weights & Biases",
+        default=False,
+    )
     args = parser.parse_args()
-    train(args.env_name, args.recording_freq)
+    train(args.env_name, args.recording_freq, args.track)
